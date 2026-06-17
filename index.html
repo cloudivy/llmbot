@@ -11,13 +11,14 @@
     <script src="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.63.1/build/stlite.js"></script>
     <script>
         stlite.mount({
-            requirements: ["pypdf", "groq"],
+            requirements: ["pypdf"],
             entrypoint: "app.py",
             files: {
                 "app.py": `
 import streamlit as st
+import json
 from pypdf import PdfReader
-from groq import Groq
+from pyodide.http import pyfetch
 
 st.set_page_config(page_title="Serverless Groq AI", layout="wide")
 
@@ -37,6 +38,28 @@ def split_text(text, chunk_size=800, overlap=150):
         chunks.append(text[start:end])
         start += chunk_size - overlap
     return chunks
+
+async def ask_groq(api_key, system_prompt, user_prompt):
+    resp = await pyfetch(
+        "https://api.groq.com/openai/v1/chat/completions",
+        method="POST",
+        headers={
+            "Authorization": "Bearer " + api_key,
+            "Content-Type": "application/json",
+        },
+        body=json.dumps({
+            "model": "llama-3.3-70b-versatile",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": 0.1,
+        }),
+    )
+    data = await resp.json()
+    if "error" in data:
+        raise RuntimeError(data["error"].get("message", "Unknown API error"))
+    return data["choices"][0]["message"]["content"]
 
 with st.sidebar:
     st.header("🔑 Authentication & Control")
@@ -95,17 +118,10 @@ if user_prompt := st.chat_input("Ask anything about your documents..."):
                     if context_match:
                         system_prompt += f"\\nContext:\\n{context_match}"
 
-                    client = Groq(api_key=user_key)
-                    completion = client.chat.completions.create(
-                        model="llama-3.3-70b-versatile",
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt}
-                        ],
-                        temperature=0.1
+                    import asyncio
+                    ai_reply = asyncio.get_event_loop().run_until_complete(
+                        ask_groq(user_key, system_prompt, user_prompt)
                     )
-
-                    ai_reply = completion.choices[0].message.content
                     st.markdown(ai_reply)
                     st.session_state.messages.append({"role": "assistant", "content": ai_reply})
                 except Exception as e:

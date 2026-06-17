@@ -1,0 +1,47 @@
+name: Deploy Chatbot Frontend to GitHub Pages
+
+on:
+  push:
+    branches: ["main"] # Fires automatically whenever you update code in the main branch
+  workflow_dispatch:   # Allows manual execution from the Actions tab
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Web Directory Structures
+        run: |
+          mkdir -p dist
+          cp index.html dist/
+          
+      - name: Setup GitHub Pages Infrastructure
+        uses: actions/configure-pages@v5
+
+      - name: Pack Production Assets
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './dist'
+
+      - name: Publish Website Live
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Generate Active URL Output Link
+        run: |
+          echo "### 🚀 Chatbot Frontend Live Line Successfully Formed!" >> $GITHUB_STEP_SUMMARY
+          echo "Access your global client workspace link here: ${{ steps.deployment.outputs.page_url }}" >> $GITHUB_STEP_SUMMARY

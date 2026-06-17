@@ -26,18 +26,17 @@ jobs:
 
       - name: Setup GitHub Pages Metadata
         uses: actions/configure-pages@v5
-          
+
       - name: Pack Production Assets
         uses: actions/upload-pages-artifact@v3
         with:
-          # This tells the builder to look directly at your root folder for index.html
-          path: '.' 
+          path: '.'
 
       - name: Publish Website Live
         id: deployment
         uses: actions/deploy-pages@v4
 
-      - name: Generate Active URL Output Link
+      - name: Output Live URL
         run: |
-          echo "### 🚀 Chatbot Frontend Live Line Successfully Formed!" >> $GITHUB_STEP_SUMMARY
-          echo "Access your global client workspace link here: ${{ steps.deployment.outputs.page_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "### 🚀 Chatbot frontend deployed successfully" >> $GITHUB_STEP_SUMMARY
+          echo "Live URL: ${{ steps.deployment.outputs.page_url }}" >> $GITHUB_STEP_SUMMARY

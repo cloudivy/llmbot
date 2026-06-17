@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Serverless Groq PDF Chatbot</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.63.1/build/stlite.css" />
+</head>
+<body>
+    <div id="root"></div>
+    <script src="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.63.1/build/stlite.js"></script>
+    <script>
+        stlite.mount({
+            requirements: ["pypdf", "langchain-text-splitters", "groq"],
+            entrypoint: "app.py",
+            files: {
+                "app.py": `
+import streamlit as st
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from pypdf import PyPDFReader
+from groq import Groq
+
+st.set_page_config(page_title="Serverless Groq AI", layout="wide")
+
+st.title("⚡ Serverless Groq PDF Chatbot")
+st.caption("Compiled completely inside your web browser via WebAssembly (Wasm)")
+
+# Session initialization parameters 
+if "document_chunks" not in st.session_state:
+    st.session_state.document_chunks = []
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# Sidebar control room panel
+with st.sidebar:
+    st.header("🔑 Authentication & Control")
+    user_key = st.text_input("Enter your Groq API Key:", type="password", help="Grab a free token key out of console.groq.com")
+    
+    st.write("---")
+    st.header("📚 Document Repository")
+    uploaded_files = st.file_uploader("Upload your context PDFs", type=["pdf"], accept_multiple_files=True)
+    
+    if uploaded_files and st.button("Index Documents", use_container_width=True):
+        with st.spinner("Extracting text contents locally..."):
+            all_chunks = []
+            for file in uploaded_files:
+                pdf_reader = PyPDFReader(file)
+                raw_text = ""
+                for page in pdf_reader.pages:
+                    text_content = page.extract_text()
+                    if text_content:
+                        raw_text += text_content + "\\n"
+                
+                # Split texts into queryable fragments
+                splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=150)
+                chunks = splitter.split_text(raw_text)
+                all_chunks.extend(chunks)
+            
+            st.session_state.document_chunks = all_chunks
+            st.success(f"Indexed {len(all_chunks)} target passages!")
+
+# Render chat interface arrays
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+if user_prompt := st.chat_input("Ask anything about your document context tracks..."):
+    st.session_state.messages.append({"role": "user", "content": user_prompt})
+    with st.chat_message("user"):
+        st.markdown(user_prompt)
+        
+    with st.chat_message("assistant"):
+        if not user_key:
+            st.error("Please insert your Groq token key signature in the sidebar to authorize requests.")
+        else:
+            with st.spinner("Executing low-latency inference cycles..."):
+                try:
+                    # In-browser matching logic parameters
+                    context_match = ""
+                    if st.session_state.document_chunks:
+                        # Scan string fragments containing user query components
+                        matches = [c for c in st.session_state.document_chunks if any(word.lower() in c.lower() for word in user_prompt.split()[:3])]
+                        context_match = "\\n\\n---\\n\\n".join(matches[:3]) if matches else "\\n\\n".join(st.session_state.document_chunks[:2])
+                    
+                    system_prompt = "You are a factual analytical assistant. Use the document context below to resolve user inputs.\\n"
+                    if context_match:
+                        system_prompt += f"\\nContext Layer:\\n{context_match}"
+                        
+                    client = Groq(api_key=user_key)
+                    completion = client.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        temperature=0.1
+                    )
+                    
+                    ai_reply = completion.choices[0].message.content
+                    st.markdown(ai_reply)
+                    st.session_state.messages.append({"role": "assistant", "content": ai_reply})
+                except Exception as e:
+                    st.error(f"Inference execution log error tracking block: {str(e)}")
+`
+            }
+        });
+    </script>
+</body>
+</html>

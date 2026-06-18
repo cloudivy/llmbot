@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Serverless Groq PDF Chatbot</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.75.0/build/stlite.css" />
+</head>
+<body>
+    <div id="root"></div>
+    <script src="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.75.0/build/stlite.js"></script>
+    <script>
+        stlite.mount({
+            requirements: ["pypdf"],
+            entrypoint: "app.py",
+            files: {
+                "app.py": `
+import streamlit as st
+import json
+from pypdf import PdfReader
+from pyodide.http import pyfetch
+
+st.set_page_config(page_title="Serverless Groq AI", layout="wide")
+
+st.title("⚡ Serverless Groq PDF Chatbot")
+st.caption("Compiled completely inside your web browser via WebAssembly (Wasm)")
+
+if "document_chunks" not in st.session_state:
+    st.session_state.document_chunks = []
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+def split_text(text, chunk_size=800, overlap=150):
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = start + chunk_size
+        chunks.append(text[start:end])
+        start += chunk_size - overlap
+    return chunks
+
+async def ask_groq(api_key, system_prompt, user_prompt):
+    resp = await pyfetch(
+        "https://api.groq.com/openai/v1/chat/completions",
+        method="POST",
+        headers={
+            "Authorization": "Bearer " + api_key,
+            "Content-Type": "application/json",
+        },
+        body=json.dumps({
+            "model": "llama-3.3-70b-versatile",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": 0.1,
+        }),
+    )
+    data = await resp.json()
+    if "error" in data:
+        raise RuntimeError(data["error"].get("message", "Unknown API error"))
+    return data["choices"][0]["message"]["content"]
+
+with st.sidebar:
+    st.header("🔑 Authentication & Control")
+    user_key = st.text_input("Enter your Groq API Key:", type="password", help="Get a free key at console.groq.com")
+
+    st.write("---")
+    st.header("📚 Document Repository")
+    uploaded_files = st.file_uploader("Upload your context PDFs", type=["pdf"], accept_multiple_files=True)
+
+    if uploaded_files and st.button("Index Documents", use_container_width=True):
+        with st.spinner("Extracting text locally..."):
+            all_chunks = []
+            for file in uploaded_files:
+                pdf_reader = PdfReader(file)
+                raw_text = ""
+                for page in pdf_reader.pages:
+                    text_content = page.extract_text()
+                    if text_content:
+                        raw_text += text_content + "\\n"
+                all_chunks.extend(split_text(raw_text))
+
+            st.session_state.document_chunks = all_chunks
+            st.success(f"Indexed {len(all_chunks)} passages!")
+
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+if user_prompt := st.chat_input("Ask anything about your documents..."):
+    st.session_state.messages.append({"role": "user", "content": user_prompt})
+    with st.chat_message("user"):
+        st.markdown(user_prompt)
+
+    with st.chat_message("assistant"):
+        if not user_key:
+            st.error("Please enter your Groq API key in the sidebar to authorize requests.")
+        else:
+            with st.spinner("Running inference..."):
+                try:
+                    context_match = ""
+                    if st.session_state.document_chunks:
+                        query_words = [w.lower() for w in user_prompt.split() if len(w) > 3]
+                        scored = []
+                        for c in st.session_state.document_chunks:
+                            cl = c.lower()
+                            score = sum(cl.count(w) for w in query_words)
+                            if score > 0:
+                                scored.append((score, c))
+                        scored.sort(key=lambda x: x[0], reverse=True)
+                        if scored:
+                            context_match = "\\n\\n---\\n\\n".join(c for _, c in scored[:3])
+                        else:
+                            context_match = "\\n\\n".join(st.session_state.document_chunks[:2])
+
+                    system_prompt = "You are a factual analytical assistant. Use the document context below to answer.\\n"
+                    if context_match:
+                        system_prompt += f"\\nContext:\\n{context_match}"
+
+                    import asyncio
+                    ai_reply = asyncio.get_event_loop().run_until_complete(
+                        ask_groq(user_key, system_prompt, user_prompt)
+                    )
+                    st.markdown(ai_reply)
+                    st.session_state.messages.append({"role": "assistant", "content": ai_reply})
+                except Exception as e:
+                    st.error(f"Inference error: {str(e)}")
+`
+            }
+        });
+    </script>
+</body>
+</html>
